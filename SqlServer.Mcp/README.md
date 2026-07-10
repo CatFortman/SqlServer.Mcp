@@ -36,7 +36,7 @@ Register with Claude Code by adding `.mcp.json` to any project (or use `claude m
     "sqlserver": {
       "type": "stdio",
       "command": "dotnet",
-      "args": ["run", "--project", "C:/dev/SqlServer.Mcp"],
+      "args": ["run", "--project", "C:/Projects/SqlServer.Mcp"],
       "env": {
         "SQLSERVER_CONNECTION": "Server=localhost;Database=TestDb;Integrated Security=true;TrustServerCertificate=true"
       }
