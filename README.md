@@ -79,15 +79,21 @@ Server=localhost;Database=TestDb;Integrated Security=true;TrustServerCertificate
 
 Use the published executable rather than `dotnet run --project`, which rebuilds before every session starts. `dotnet run` is fine while developing the server itself.
 
+```
+npx @modelcontextprotocol/inspector -e "SQLSERVER_CONNECTION=..." -- dotnet run --project C:\Projects\SqlServer.Mcp\SqlServer.Mcp
+```
+
 Verify inside a Claude Code session with `/mcp`.
 
-## Debugging without an LLM
+## Testing without an LLM
 
-Use the MCP Inspector to invoke tools directly. From the repo root:
+Use the MCP Inspector to invoke tools directly:
 
-```bash
-npx @modelcontextprotocol/inspector dotnet run --project SqlServer.Mcp
 ```
+npx @modelcontextprotocol/inspector -e "SQLSERVER_CONNECTION=Server=localhost;Database=Orders;Integrated Security=true;TrustServerCertificate=true" -- C:\Tools\SqlServer.Mcp\SqlServer.Mcp.exe
+```
+
+![alt text](Images/Inspector.png)
 
 Much faster feedback loop than prompting a model while iterating on tool behavior. Verify each error category there before testing with Claude (#5).
 
