@@ -33,24 +33,58 @@ public static class PerformanceTools
     }
 
     [McpServerTool, Description(
-        "Reports current blocking chains: which sessions are blocked, what is blocking " +
-        "them, wait types, and the statements involved. Use when queries are hanging " +
-        "or timing out right now - this is a live snapshot, not historical data.")]
+        "Reports current blocking: which requests are blocked, which session is blocking " +
+        "them, wait types and the statements involved, plus the blocking session's state " +
+        "(an idle blocker holding an open transaction is common). Use when queries are " +
+        "hanging or timing out right now. This is a live snapshot taken at captured_at_utc, " +
+        "not history: an empty blocked_requests list means nothing was blocked at that " +
+        "moment, not that nothing was blocked earlier.")]
     public static async Task<string> CheckBlocking(
         SqlQueryRunner runner,
         CancellationToken cancellationToken = default)
     {
-        // TODO (issue #5): port the blocking-chain script using
-        // sys.dm_exec_requests joined on blocking_session_id, with
-        // sys.dm_exec_sessions for host/login context.
+        // Stamp the snapshot with the database server's own clock and name, so the
+        // evidence says when and where it was observed. A bare [] can't carry a time.
+        var snapshot = (await runner.QueryAsync(
+            "SELECT SYSUTCDATETIME() AS captured_at_utc, @@SERVERNAME AS server_name",
+            cancellationToken: cancellationToken))[0];
+
+        // TODO (issue #5): full port of the toolkit's blocking-chain script
+        // (lock details, full chain walk). This covers the blocked requests and
+        // the state of each one's direct blocker.
         var rows = await runner.QueryAsync(
             """
-            SELECT r.session_id, r.blocking_session_id, r.wait_type, r.wait_time
-            FROM sys.dm_exec_requests r
+            SELECT TOP (50)
+                r.session_id,
+                r.blocking_session_id,
+                DB_NAME(r.database_id)   AS database_name,
+                r.status,
+                r.command,
+                r.wait_type,
+                r.wait_time              AS wait_time_ms,
+                r.wait_resource,
+                LEFT(t.text, 500)        AS statement_text,
+                b.status                 AS blocker_status,
+                b.open_transaction_count AS blocker_open_transaction_count,
+                b.program_name           AS blocker_program_name
+            FROM sys.dm_exec_requests AS r
+            LEFT JOIN sys.dm_exec_sessions AS b ON b.session_id = r.blocking_session_id
+            OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) AS t
             WHERE r.blocking_session_id <> 0
+            ORDER BY r.wait_time DESC
             """,
             cancellationToken: cancellationToken);
 
-        return JsonSerializer.Serialize(rows);
+        // SYSUTCDATETIME() comes back as an unspecified-kind DateTime; mark it UTC so
+        // the ISO 8601 string ends in Z.
+        var capturedAt = DateTime.SpecifyKind((DateTime)snapshot["captured_at_utc"]!, DateTimeKind.Utc);
+
+        return JsonSerializer.Serialize(new
+        {
+            captured_at_utc = capturedAt.ToString("O"),
+            server_name = snapshot["server_name"],
+            blocked_request_count = rows.Count,
+            blocked_requests = rows,
+        });
     }
 }
