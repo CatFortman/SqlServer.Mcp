@@ -1,19 +1,20 @@
 using System.ComponentModel;
 using System.Text.Json;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using SqlServer.Mcp.Data;
 
 namespace SqlServer.Mcp.Tools;
 
 [McpServerToolType]
-public static class PerformanceTools
+internal static class PerformanceTools
 {
     [McpServerTool, Description(
         "Finds the top N slowest queries by average CPU time from the plan cache, " +
         "including execution counts and query text. Use when investigating general " +
         "slowness, high CPU, or when asked 'why is the database slow'. Results only " +
         "cover queries still in the plan cache.")]
-    public static async Task<string> FindSlowQueries(
+    internal static async Task<CallToolResult> FindSlowQueries(
         SqlQueryRunner runner,
         [Description("Number of queries to return, default 10, max 50")]
         int top = 10,
@@ -24,12 +25,30 @@ public static class PerformanceTools
         // to ~500 chars per row - Claude does not need the full batch and
         // oversized tool results waste context.
         var clampedTop = Math.Clamp(top, 1, 50);
-        var rows = await runner.QueryAsync(
+
+        try
+        {
+            var rows = await runner.QueryAsync(
             "SELECT TOP (@top) session_id, status, cpu_time FROM sys.dm_exec_requests ORDER BY cpu_time DESC",
             new Dictionary<string, object> { ["@top"] = clampedTop },
             cancellationToken);
 
-        return JsonSerializer.Serialize(rows);
+            return new CallToolResult
+            {
+                IsError = false,
+                Content =
+                [
+                    new TextContentBlock
+                    {
+                        Text = JsonSerializer.Serialize(rows)
+                    }
+                ]
+            };
+        }
+        catch (Exception ex)
+        {
+            return ex.ToCallToolResult(message: "Failed to find slow queries.");
+        }
     }
 
     [McpServerTool, Description(
@@ -39,7 +58,7 @@ public static class PerformanceTools
         "hanging or timing out right now. This is a live snapshot taken at captured_at_utc, " +
         "not history: an empty blocked_requests list means nothing was blocked at that " +
         "moment, not that nothing was blocked earlier.")]
-    public static async Task<string> CheckBlocking(
+    internal static async Task<CallToolResult> CheckBlocking(
         SqlQueryRunner runner,
         CancellationToken cancellationToken = default)
     {
@@ -49,11 +68,14 @@ public static class PerformanceTools
             "SELECT SYSUTCDATETIME() AS captured_at_utc, @@SERVERNAME AS server_name",
             cancellationToken: cancellationToken))[0];
 
-        // TODO (issue #5): full port of the toolkit's blocking-chain script
-        // (lock details, full chain walk). This covers the blocked requests and
-        // the state of each one's direct blocker.
-        var rows = await runner.QueryAsync(
-            """
+
+        try
+        {
+            // TODO (issue #5): full port of the toolkit's blocking-chain script
+            // (lock details, full chain walk). This covers the blocked requests and
+            // the state of each one's direct blocker.
+            var rows = await runner.QueryAsync(
+                """
             SELECT TOP (50)
                 r.session_id,
                 r.blocking_session_id,
@@ -73,18 +95,33 @@ public static class PerformanceTools
             WHERE r.blocking_session_id <> 0
             ORDER BY r.wait_time DESC
             """,
-            cancellationToken: cancellationToken);
+                cancellationToken: cancellationToken);
 
-        // SYSUTCDATETIME() comes back as an unspecified-kind DateTime; mark it UTC so
-        // the ISO 8601 string ends in Z.
-        var capturedAt = DateTime.SpecifyKind((DateTime)snapshot["captured_at_utc"]!, DateTimeKind.Utc);
+            // SYSUTCDATETIME() comes back as an unspecified-kind DateTime; mark it UTC so
+            // the ISO 8601 string ends in Z.
+            var capturedAt = DateTime.SpecifyKind((DateTime)snapshot["captured_at_utc"]!, DateTimeKind.Utc);
 
-        return JsonSerializer.Serialize(new
+            return new CallToolResult
+            {
+                IsError = false,
+                Content =
+                [
+                    new TextContentBlock
+                {
+                    Text = JsonSerializer.Serialize(new
+                    {
+                        captured_at_utc = capturedAt.ToString("O"),
+                        server_name = snapshot["server_name"],
+                        blocked_request_count = rows.Count,
+                        blocked_requests = rows,
+                    })
+                }
+                ]
+            };
+        }
+        catch (Exception ex)
         {
-            captured_at_utc = capturedAt.ToString("O"),
-            server_name = snapshot["server_name"],
-            blocked_request_count = rows.Count,
-            blocked_requests = rows,
-        });
+            return ex.ToCallToolResult(message: "Failed to check blocking.");
+        }
     }
 }
