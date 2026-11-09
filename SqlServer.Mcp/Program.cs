@@ -11,12 +11,6 @@ var builder = Host.CreateApplicationBuilder(args);
 // All logging must go to stderr or the protocol stream gets corrupted.
 builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
-var jsonOptions = new JsonSerializerOptions
-{
-    TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
-    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-};
-
 builder.Services.AddSingleton<SqlQueryRunner>();
 
 builder.Services

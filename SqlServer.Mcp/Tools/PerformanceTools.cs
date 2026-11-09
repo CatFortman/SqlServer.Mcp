@@ -1,57 +1,50 @@
 using System.ComponentModel;
-using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using SqlServer.Mcp.Data;
+using static ToolResults;
 
 namespace SqlServer.Mcp.Tools;
 
 [McpServerToolType]
 internal static class PerformanceTools
 {
-    [McpServerTool, Description(
+    private const string LogCategory = "SqlServer.Mcp.Tools.PerformanceTools";
+
+    [McpServerTool(Name = ToolNames.FindSlowQueries, ReadOnly = true), Description(
         "Finds the top N slowest queries by average CPU time from the plan cache, " +
         "including execution counts and query text. Use when investigating general " +
         "slowness, high CPU, or when asked 'why is the database slow'. Results only " +
         "cover queries still in the plan cache.")]
     internal static async Task<CallToolResult> FindSlowQueries(
         SqlQueryRunner runner,
+        ILoggerFactory loggerFactory,
         [Description("Number of queries to return, default 10, max 50")]
         int top = 10,
         CancellationToken cancellationToken = default)
     {
-        // TODO (issue #4): port the slow-query script from the toolkit using
-        // sys.dm_exec_query_stats + sys.dm_exec_sql_text. Truncate query text
-        // to ~500 chars per row - Claude does not need the full batch and
-        // oversized tool results waste context.
-        var clampedTop = Math.Clamp(top, 1, 50);
-
-        try
+        var query = "SELECT TOP (@top) session_id, status, cpu_time FROM sys.dm_exec_requests ORDER BY cpu_time DESC";
+        return await RunAsync(async () =>
         {
-            var rows = await runner.QueryAsync(
-            "SELECT TOP (@top) session_id, status, cpu_time FROM sys.dm_exec_requests ORDER BY cpu_time DESC",
+            // TODO (issue #4): port the slow-query script from the toolkit using
+            // sys.dm_exec_query_stats + sys.dm_exec_sql_text. Truncate query text
+            // to ~500 chars per row - Claude does not need the full batch and
+            // oversized tool results waste context.
+            var clampedTop = Math.Clamp(top, 1, 50);
+
+            return await runner.QueryAsync(
+            query,
             new Dictionary<string, object> { ["@top"] = clampedTop },
             cancellationToken);
-
-            return new CallToolResult
-            {
-                IsError = false,
-                Content =
-                [
-                    new TextContentBlock
-                    {
-                        Text = JsonSerializer.Serialize(rows)
-                    }
-                ]
-            };
-        }
-        catch (Exception ex)
-        {
-            return ex.ToCallToolResult(message: "Failed to find slow queries.");
-        }
+        },
+            loggerFactory.CreateLogger(LogCategory),
+            ToolNames.FindSlowQueries,
+            new Dictionary<string, object> { ["top"] = top, ["query"] = query }
+        );
     }
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = ToolNames.CheckBlocking, ReadOnly = true), Description(
         "Reports current blocking: which requests are blocked, which session is blocking " +
         "them, wait types and the statements involved, plus the blocking session's state " +
         "(an idle blocker holding an open transaction is common). Use when queries are " +
@@ -60,17 +53,19 @@ internal static class PerformanceTools
         "moment, not that nothing was blocked earlier.")]
     internal static async Task<CallToolResult> CheckBlocking(
         SqlQueryRunner runner,
+        ILoggerFactory loggerFactory,
         CancellationToken cancellationToken = default)
     {
-        // Stamp the snapshot with the database server's own clock and name, so the
-        // evidence says when and where it was observed. A bare [] can't carry a time.
-        var snapshot = (await runner.QueryAsync(
-            "SELECT SYSUTCDATETIME() AS captured_at_utc, @@SERVERNAME AS server_name",
-            cancellationToken: cancellationToken))[0];
-
-
-        try
+        var query = "SELECT SYSUTCDATETIME() AS captured_at_utc, @@SERVERNAME AS server_name";
+        return await RunAsync(async () =>
         {
+            // Stamp the snapshot with the database server's own clock and name, so the
+            // evidence says when and where it was observed. A bare [] can't carry a time.
+            var query = "SELECT SYSUTCDATETIME() AS captured_at_utc, @@SERVERNAME AS server_name";
+            var snapshot = (await runner.QueryAsync(
+                query,
+                cancellationToken: cancellationToken))[0];
+
             // TODO (issue #5): full port of the toolkit's blocking-chain script
             // (lock details, full chain walk). This covers the blocked requests and
             // the state of each one's direct blocker.
@@ -101,27 +96,17 @@ internal static class PerformanceTools
             // the ISO 8601 string ends in Z.
             var capturedAt = DateTime.SpecifyKind((DateTime)snapshot["captured_at_utc"]!, DateTimeKind.Utc);
 
-            return new CallToolResult
+            return new
             {
-                IsError = false,
-                Content =
-                [
-                    new TextContentBlock
-                {
-                    Text = JsonSerializer.Serialize(new
-                    {
-                        captured_at_utc = capturedAt.ToString("O"),
-                        server_name = snapshot["server_name"],
-                        blocked_request_count = rows.Count,
-                        blocked_requests = rows,
-                    })
-                }
-                ]
+                captured_at_utc = capturedAt.ToString("O"),
+                server_name = snapshot["server_name"],
+                blocked_request_count = rows.Count,
+                blocked_requests = rows,
             };
-        }
-        catch (Exception ex)
-        {
-            return ex.ToCallToolResult(message: "Failed to check blocking.");
-        }
+        },
+            loggerFactory.CreateLogger(LogCategory),
+            ToolNames.CheckBlocking,
+            new Dictionary<string, object> { ["query"] = query }
+        );
     }
 }
