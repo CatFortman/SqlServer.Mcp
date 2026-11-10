@@ -14,7 +14,7 @@ internal enum ToolErrorReason
     InvalidObjectName
 }
 
-internal enum ToolErrorCategory { Transient, Validation, Permission, Business }
+internal enum ToolErrorCategory { Transient, Validation, Permission, Business, Unknown }
 
 internal static class ToolErrors
 {
@@ -28,7 +28,7 @@ internal static class ToolErrors
             => ToolErrorCategory.Validation,
         ToolErrorReason.QueryDefect
             => ToolErrorCategory.Business,
-        _ => ToolErrorCategory.Transient, // Unknown: see point 4
+        _ => ToolErrorCategory.Unknown, // Unknown: see point 4
     };
 
     internal static (ToolErrorCategory category, ToolErrorReason reason, bool retryable, string message) Classify(Exception ex)
