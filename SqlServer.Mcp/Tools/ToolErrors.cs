@@ -48,7 +48,7 @@ internal static class ToolErrors
                 18456 => (CategoryOf(ToolErrorReason.LoginFailed), ToolErrorReason.LoginFailed, false, "Login failed for the user specified in the connection string."), // permission non-transient, cannot retry
                 229 => (CategoryOf(ToolErrorReason.Permission), ToolErrorReason.Permission, false, "Permission denied for the operation."), // permission non-transient, cannot retry
                 297 or 300 => (CategoryOf(ToolErrorReason.Permission), ToolErrorReason.Permission, false, "The SQL login lacks VIEW SERVER STATE (VIEW SERVER PERFORMANCE STATE on SQL Server 2022+), so server DMVs cannot be read."), // permission non-transient, cannot retry
-                102 => (CategoryOf(ToolErrorReason.QueryDefect), ToolErrorReason.QueryDefect, false, "Invalid object name specified in the query."), // validation non-transient, cannot retry
+                102 => (CategoryOf(ToolErrorReason.QueryDefect), ToolErrorReason.QueryDefect, false, "The server’s query is malformed (server defect); report it, don’t retry."), // validation non-transient, cannot retry
                 208 => (CategoryOf(ToolErrorReason.InvalidObjectName), ToolErrorReason.InvalidObjectName, false, "Invalid object name specified in the query."), // validation non-transient, cannot retry
                 _ => (CategoryOf(ToolErrorReason.Unknown), ToolErrorReason.Unknown, false, "An unexpected error occurred.")
             };

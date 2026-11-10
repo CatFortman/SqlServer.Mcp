@@ -1,10 +1,17 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 
 internal static class ToolResults
 {
-    static readonly JsonSerializerOptions options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+    static readonly JsonSerializerOptions options = new JsonSerializerOptions
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower) }
+    };
+
     internal static class ToolNames
     {
         internal const string CheckBlocking = "check_blocking";
@@ -18,11 +25,6 @@ internal static class ToolResults
     string toolName,
     Dictionary<string, object>? attempted = null)
     {
-        var jsonOptions = new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-        };
-
         try
         {
             var payload = await work();
@@ -30,21 +32,37 @@ internal static class ToolResults
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "{Tool} failed", toolName);           // full detail to stderr/log only
+            // error_id joins the tool result the model sees to the full exception in the log.
+            // sql_error_number is safe to show the model (no stack trace, no connection
+            // details) and identifies an unmapped SqlException without opening the log.
+            var errorId = Guid.NewGuid().ToString("N");
+            var sqlErrorNumber = (ex as SqlException)?.Number;
             var (category, reason, retryable, message) = ToolErrors.Classify(ex); // SqlException.Number map
+
+            // Full detail to stderr and the log file only, never to the model.
+            logger.LogError(ex,
+                "{Tool} failed: error_id {ErrorId}, reason {Reason}, sql_error_number {SqlErrorNumber}",
+                toolName, errorId, reason, sqlErrorNumber);
+
             return new CallToolResult
             {
                 IsError = true,
-                Content = [new TextContentBlock { Text = JsonSerializer.Serialize(new {
-                    error_category = category,
-                    reason,
-                    is_retryable = retryable,
-                    message, tool = toolName,
-                    attempted_at_utc = DateTime.UtcNow.ToString("O") ,
-                    attempted = attempted ?? []
-                    },
+                Content = [
+                    new TextContentBlock
+                    { Text = JsonSerializer.Serialize(new {
+                        error_category = category,
+                        reason,
+                        is_retryable = retryable,
+                        message,
+                        tool = toolName,
+                        error_id = errorId,
+                        sql_error_number = sqlErrorNumber,
+                        attempted_at_utc = DateTime.UtcNow.ToString("O"),
+                        attempted = attempted ?? []
+                        },
                     options)
-                }]
+                    }
+                ]
             };
         }
     }
