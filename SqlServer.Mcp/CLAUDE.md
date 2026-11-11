@@ -15,14 +15,14 @@ An MCP server exposing read-only SQL Server diagnostics as tools, built on the o
 ## Hard rules
 
 - **Read-only server.** Never add tools that execute DDL, DML writes, or maintenance commands (index rebuilds, DBCC, etc.). If a task seems to require writes, stop and ask.
-- **Never write to stdout.** Stdout is the JSON-RPC channel. Logging goes to stderr only (configured in Program.cs). No `Console.WriteLine` anywhere.
+- **Never write to stdout.** Stdout is the JSON-RPC channel. Logging goes to stderr and to a rolling file in `%LOCALAPPDATA%\SqlServer.Mcp\logs` (override with `SQLSERVER_MCP_LOG_DIR`), both configured in Program.cs. No `Console.WriteLine` anywhere, and no Serilog console sink (it writes to stdout by default).
 - **All queries parameterized.** Identifiers that cannot be parameterized (table names) must be validated against system catalogs (`sys.tables`) before use.
 - **Keep tool results small.** Truncate query text fields to ~500 chars. Cap row counts. Oversized results waste the client's context window.
 - No new NuGet packages without asking.
 
 ## Conventions
 
-- Tools are static methods in `Tools/`, attributed with `[McpServerToolType]` / `[McpServerTool]`, returning JSON-serialized results as `string`.
+- Tools are static methods in `Tools/`, attributed with `[McpServerToolType]` / `[McpServerTool]`, returning `Task<CallToolResult>` through `ToolResults.RunAsync`, which serializes success payloads and turns exceptions into the error contract (`isError: true`, category, reason, `error_id`).
 - `Description` attributes on tools and parameters are user-facing API. When adding or changing a tool, write the description for a model deciding *when* to call it: what it does, when to use it, and any caveats (e.g. "plan cache only, not historical").
 - Data access goes through `SqlQueryRunner`. Don't open connections in tool methods.
 
